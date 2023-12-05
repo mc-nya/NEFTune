@@ -2,3 +2,5 @@ slurm_logs/
 slurm_scripts/
 .pylintrc
 .vscode/
+scripts/
+.pytest_cache/

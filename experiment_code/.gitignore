@@ -9,3 +9,5 @@ log/
 dummy_script.sh
 checkpoints/
 scripts/
+pretrained_models/
+*_debug.py
