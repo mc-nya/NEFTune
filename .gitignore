@@ -1,0 +1,4 @@
+slurm_logs/
+slurm_scripts/
+.pylintrc
+.vscode/

@@ -10,7 +10,6 @@ from typing import Optional, Sequence, Union, Any, Mapping, Iterable, Union, Lis
 
 import openai
 import tqdm
-from openai import openai_object
 import copy
 
 
