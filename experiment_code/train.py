@@ -253,15 +253,21 @@ def fsdp_main(rank, world_size, args):
                     embed_new = torch.zeros_like(embeds_init).to(
                         embeds_init
                     )  # B x L x D
-                    embed_new = (
-                        mixup_weights_full * embeds_init
-                        + (1 - mixup_weights_full) * embeds_init
-                    )
+                    if args.mixup_detach:
+                        embed_new = (
+                            mixup_weights_full * embeds_init
+                            + (1 - mixup_weights_full) * embeds_init.detach()
+                        )
+                    else:
+                        embed_new = (
+                            mixup_weights_full * embeds_init
+                            + (1 - mixup_weights_full) * embeds_init
+                        )
+
 
                     embed_new[~is_mixup] = embeds_init[~is_mixup]
 
-                    embed_new = embed_new.detach()
-                    print(embed_new.shape)
+                    #embed_new = embed_new.detach()
                     data["inputs_embeds"] = embed_new
                     data["input_ids"] = None
 
@@ -297,7 +303,7 @@ def fsdp_main(rank, world_size, args):
 
             out = model(**data)
 
-            # (out.loss / accumulation_steps).backward()
+            (out.loss / accumulation_steps).backward()
             train_loss += out.loss.item() / accumulation_steps
         model.clip_grad_norm_(args.max_grad_norm)
         if rank == 0:
@@ -408,6 +414,8 @@ if __name__ == "__main__":
     parser.add_argument("--mixup_strat", type=str, default=None)
     parser.add_argument("--mixup_alpha", type=float, default=0.2)
     parser.add_argument("--mixup_prob", type=float, default=0.5)
+    parser.add_argument("--mixup_detach", action="store_true")
+
 
     args = parser.parse_args()
 
