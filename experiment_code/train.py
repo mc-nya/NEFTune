@@ -199,15 +199,10 @@ def fsdp_main(rank, world_size, args):
                 dataloader = dataloader_full
                 epoch_iterator = iter(dataloader)
                 data = next(epoch_iterator)
-            if args.mixup:
-                try:
-                    extra_data = next(epoch_iterator)
-                except StopIteration:
-                    sampler.set_epoch(sampler.epoch + 1)
-                    dataloader = dataloader_full
-                    epoch_iterator = iter(dataloader)
-                    extra_data = next(epoch_iterator)
-                if isinstance(
+            if args.mixup_strat is not None:
+                if args.mixup_strat not in ["simple"]:
+                    raise ValueError(f"Unknown mixup strategy {args.mixup_strat}")
+                if args.mixup_strat == "simple" and isinstance(
                     model,
                     torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel,
                 ):
@@ -218,24 +213,57 @@ def fsdp_main(rank, world_size, args):
                     embeds_init = model._fsdp_wrapped_module.model.embed_tokens.forward(
                         data["input_ids"].to(embed_device)
                     )
-                    embeds_extra = (
-                        model._fsdp_wrapped_module.model.embed_tokens.forward(
-                            extra_data["input_ids"].to(embed_device)
-                        )
-                    )
-                    input_mask = data["attention_mask"].to(embeds_init)
-                    input_lengths = torch.sum(input_mask, 1)
-                    input_mask_extra = extra_data["attention_mask"].to(embeds_extra)
-                    input_lengths_extra = torch.sum(input_mask_extra, 1)
-
-                    # Then get mixup weights using beta distribution (0.2, 0.2)
-                    mixup_weights = (
-                        torch.distributions.beta.Beta(0.2, 0.2)
-                        .sample((len(input_lengths),))
+                    # Create mixup
+                    # in the simple strategy, assume we have 2*n examples in the batch and n weights (w1, w2, ..., wn > 0.5), we what to create a new batch of embeddings as follows:
+                    # First n examples: w1 * embeds_1 + (1-w1) * embeds_(n+1), w2 * embeds_2 + (1-w2) * embeds_(n+2), ..., wn * embeds_n + (1-wn) * embeds_2n
+                    # Last n examples: (1-w1) * embeds_1 + w1 * embeds_(n+1), ..., (1-wn) * embeds_n + wn * embeds_2n
+                    # Which means first n examples are dominated by its own embeddings, and last n examples are dominated by the embeddings of its own too, and we don't change the corresponding labels
+                    # Beta distribution with mixup_alpha
+                    batch_size = embeds_init.shape[0]
+                    half_len = batch_size // 2
+                    mixup_alpha = args.mixup_alpha
+                    # Sample mixup weights for half the batch
+                    mixup_weights_half = (
+                        torch.distributions.beta.Beta(mixup_alpha, mixup_alpha)
+                        .sample((half_len,))
                         .to(embeds_init)
                     )
 
-                    # Mixup embeddings
+                    # Ensure weights are greater than 0.5
+                    mixup_weights_half = torch.where(
+                        mixup_weights_half <= 0.5,
+                        1 - mixup_weights_half,
+                        mixup_weights_half,
+                    )
+
+                    # Create full length mixup weights
+                    mixup_weights_full = torch.cat(
+                        [mixup_weights_half, 1 - mixup_weights_half], dim=0
+                    )
+
+                    # then, make weight <= 0.5 to be 1-weight
+                    mixup_weights_full = mixup_weights_full.unsqueeze(1).unsqueeze(2)
+                    mixup_weights_full = mixup_weights_full.expand(
+                        -1, embeds_init.shape[1], embeds_init.shape[2]
+                    )
+                    is_mixup = torch.rand((batch_size,)) < args.mixup_prob
+
+                    # Now we have the weights, we can create the new embeddings
+                    # First n examples
+                    embed_new = torch.zeros_like(embeds_init).to(
+                        embeds_init
+                    )  # B x L x D
+                    embed_new = (
+                        mixup_weights_full * embeds_init
+                        + (1 - mixup_weights_full) * embeds_init
+                    )
+
+                    embed_new[~is_mixup] = embeds_init[~is_mixup]
+
+                    embed_new = embed_new.detach()
+                    print(embed_new.shape)
+                    data["inputs_embeds"] = embed_new
+                    data["input_ids"] = None
 
             if args.neftune_alpha is not None:
                 if isinstance(
@@ -245,9 +273,14 @@ def fsdp_main(rank, world_size, args):
                     embed_device = (
                         model._fsdp_wrapped_module.model.embed_tokens.weight.device
                     )
-                    embeds_init = model._fsdp_wrapped_module.model.embed_tokens.forward(
-                        data["input_ids"].to(embed_device)
-                    )
+                    if data["input_ids"] is None:
+                        embeds_init = (
+                            model._fsdp_wrapped_module.model.embed_tokens.forward(
+                                data["input_ids"].to(embed_device)
+                            )
+                        )
+                    else:
+                        embeds_init = data["inputs_embeds"].to(embed_device)
 
                     ### add noise to embeds
                     input_mask = data["attention_mask"].to(embeds_init)  # B x L
@@ -264,7 +297,7 @@ def fsdp_main(rank, world_size, args):
 
             out = model(**data)
 
-            (out.loss / accumulation_steps).backward()
+            # (out.loss / accumulation_steps).backward()
             train_loss += out.loss.item() / accumulation_steps
         model.clip_grad_norm_(args.max_grad_norm)
         if rank == 0:
@@ -370,6 +403,12 @@ if __name__ == "__main__":
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wb_project", type=str, default="data_instruct")
     parser.add_argument("--wb_name", type=str, default="test")
+
+    # mixup arguments
+    parser.add_argument("--mixup_strat", type=str, default=None)
+    parser.add_argument("--mixup_alpha", type=float, default=0.2)
+    parser.add_argument("--mixup_prob", type=float, default=0.5)
+
     args = parser.parse_args()
 
     WORLD_SIZE = torch.cuda.device_count()
