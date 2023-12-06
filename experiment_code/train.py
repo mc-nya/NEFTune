@@ -264,10 +264,9 @@ def fsdp_main(rank, world_size, args):
                             + (1 - mixup_weights_full) * embeds_init
                         )
 
-
                     embed_new[~is_mixup] = embeds_init[~is_mixup]
 
-                    #embed_new = embed_new.detach()
+                    # embed_new = embed_new.detach()
                     data["inputs_embeds"] = embed_new
                     data["input_ids"] = None
 
@@ -280,13 +279,13 @@ def fsdp_main(rank, world_size, args):
                         model._fsdp_wrapped_module.model.embed_tokens.weight.device
                     )
                     if data["input_ids"] is None:
+                        embeds_init = data["inputs_embeds"].to(embed_device)
+                    else:
                         embeds_init = (
                             model._fsdp_wrapped_module.model.embed_tokens.forward(
                                 data["input_ids"].to(embed_device)
                             )
                         )
-                    else:
-                        embeds_init = data["inputs_embeds"].to(embed_device)
 
                     ### add noise to embeds
                     input_mask = data["attention_mask"].to(embeds_init)  # B x L
@@ -415,7 +414,6 @@ if __name__ == "__main__":
     parser.add_argument("--mixup_alpha", type=float, default=0.2)
     parser.add_argument("--mixup_prob", type=float, default=0.5)
     parser.add_argument("--mixup_detach", action="store_true")
-
 
     args = parser.parse_args()
 
