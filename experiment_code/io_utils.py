@@ -17,7 +17,9 @@ def read_jsonlines(filename: str) -> Iterable[Mapping[str, Any]]:
     """Yields an iterable of Python dicts after reading jsonlines from the input file."""
     file_size = os.path.getsize(filename)
     with open(filename) as fp:
-        for line in tqdm.tqdm(fp.readlines(), desc=f"Reading JSON lines from {filename}", unit="lines"):
+        for line in tqdm.tqdm(fp.readlines(),
+                              desc=f"Reading JSON lines from {filename}",
+                              unit="lines"):
             try:
                 example = json.loads(line)
                 yield example
@@ -25,16 +27,16 @@ def read_jsonlines(filename: str) -> Iterable[Mapping[str, Any]]:
                 logging.error(f'Input text: "{line}"')
                 logging.error(ex.args)
                 raise ex
-            
+
 
 def load_jsonlines(filename: str) -> List[Mapping[str, Any]]:
     """Returns a list of Python dicts after reading jsonlines from the input file."""
     return list(read_jsonlines(filename))
 
 
-def write_jsonlines(
-    objs: Iterable[Mapping[str, Any]], filename: str, to_dict: Callable = lambda x: x
-):
+def write_jsonlines(objs: Iterable[Mapping[str, Any]],
+                    filename: str,
+                    to_dict: Callable = lambda x: x):
     """Writes a list of Python Mappings as jsonlines at the input file."""
     with open(filename, "w") as fp:
         for obj in tqdm.tqdm(objs, desc=f"Writing JSON lines at {filename}"):

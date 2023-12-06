@@ -4,8 +4,12 @@ from datasets import Dataset
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--file_path", default="datasets/self-instruct-val", type=str)
-parser.add_argument("--save_file_name", default="datasets/self-instruct-val(processed)", type=str)
+parser.add_argument("--file_path",
+                    default="datasets/self-instruct-val",
+                    type=str)
+parser.add_argument("--save_file_name",
+                    default="datasets/self-instruct-val(processed)",
+                    type=str)
 args = parser.parse_args()
 
 tasks = load_jsonlines(args.file_path)
@@ -22,7 +26,7 @@ for task in tasks:
         if context:
             task['instruction'] += f"\n\n### Input:\n{task['context']}"
         del task['context']
-    
+
     tasks_processed.append(task)
 
 Dataset.from_list(tasks_processed).to_json(args.save_file_name)

@@ -102,10 +102,8 @@ class Conversation:
             for i, (role, message) in enumerate(self.messages):
                 if message:
                     ret += (
-                        role
-                        + ": "
-                        + message.replace("\r\n", "\n").replace("\n\n", "\n")
-                    )
+                        role + ": " +
+                        message.replace("\r\n", "\n").replace("\n\n", "\n"))
                     ret += "\n\n"
                 else:
                     ret += role + ":"
@@ -136,7 +134,7 @@ class Conversation:
     def to_gradio_chatbot(self):
         """Convert the conversation to gradio chatbot format"""
         ret = []
-        for i, (role, msg) in enumerate(self.messages[self.offset :]):
+        for i, (role, msg) in enumerate(self.messages[self.offset:]):
             if i % 2 == 0:
                 ret.append([msg, None])
             else:
@@ -147,7 +145,7 @@ class Conversation:
         """Convert the conversation to OpenAI chat completion format."""
         ret = [{"role": "system", "content": self.system}]
 
-        for i, (_, msg) in enumerate(self.messages[self.offset :]):
+        for i, (_, msg) in enumerate(self.messages[self.offset:]):
             if i % 2 == 0:
                 ret.append({"role": "user", "content": msg})
             else:
@@ -199,7 +197,8 @@ def get_conv_template(name: str) -> Conversation:
 register_conv_template(
     Conversation(
         name="one_shot",
-        system="A chat between a curious human and an artificial intelligence assistant. "
+        system=
+        "A chat between a curious human and an artificial intelligence assistant. "
         "The assistant gives helpful, detailed, and polite answers to the human's questions.",
         roles=("Human", "Assistant"),
         messages=(
@@ -225,14 +224,14 @@ Remember to tailor the activities to the birthday child's interests and preferen
         sep_style=SeparatorStyle.ADD_COLON_SINGLE,
         sep="\n### ",
         stop_str="###",
-    )
-)
+    ))
 
 # Vicuna v1.1 template
 register_conv_template(
     Conversation(
         name="vicuna_v1.1",
-        system="A chat between a curious user and an artificial intelligence assistant. "
+        system=
+        "A chat between a curious user and an artificial intelligence assistant. "
         "The assistant gives helpful, detailed, and polite answers to the user's questions.",
         roles=("USER", "ASSISTANT"),
         messages=(),
@@ -240,8 +239,7 @@ register_conv_template(
         sep_style=SeparatorStyle.ADD_COLON_TWO,
         sep=" ",
         sep2="</s>",
-    )
-)
+    ))
 
 # Koala default template
 register_conv_template(
@@ -254,35 +252,34 @@ register_conv_template(
         sep_style=SeparatorStyle.ADD_COLON_TWO,
         sep=" ",
         sep2="</s>",
-    )
-)
+    ))
 
 # Alpaca default template
 register_conv_template(
     Conversation(
         name="alpaca",
-        system="Below is an instruction that describes a task. Write a response that appropriately completes the request.",
+        system=
+        "Below is an instruction that describes a task. Write a response that appropriately completes the request.",
         roles=("### Instruction:", "### Response:"),
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
         sep="\n\n",
-    )
-)
+    ))
 
 # Dolly V2 default template
 register_conv_template(
     Conversation(
         name="dolly_v2",
-        system="Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n",
+        system=
+        "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n",
         roles=("### Instruction", "### Response"),
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.DOLLY,
         sep="\n\n",
         sep2="### End",
-    )
-)
+    ))
 
 # OpenAssistant Pythia default template
 register_conv_template(
@@ -294,8 +291,7 @@ register_conv_template(
         offset=0,
         sep_style=SeparatorStyle.NO_COLON_SINGLE,
         sep="<|endoftext|>",
-    )
-)
+    ))
 
 # StableLM Alpha default template
 register_conv_template(
@@ -313,14 +309,14 @@ register_conv_template(
         sep_style=SeparatorStyle.NO_COLON_SINGLE,
         sep="",
         stop_token_ids=[50278, 50279, 50277, 1, 0],
-    )
-)
+    ))
 
 # Baize default template
 register_conv_template(
     Conversation(
         name="baize",
-        system="The following is a conversation between a human and an AI assistant named Baize (named after a mythical creature in Chinese folklore). Baize is an open-source AI assistant developed by UCSD and Sun Yat-Sen University. The human and the AI assistant take turns chatting. Human statements start with [|Human|] and AI assistant statements start with [|AI|]. The AI assistant always provides responses in as much detail as possible, and in Markdown format. The AI assistant always declines to engage with topics, questions and instructions related to unethical, controversial, or sensitive issues. Complete the transcript in exactly that format.\n",
+        system=
+        "The following is a conversation between a human and an AI assistant named Baize (named after a mythical creature in Chinese folklore). Baize is an open-source AI assistant developed by UCSD and Sun Yat-Sen University. The human and the AI assistant take turns chatting. Human statements start with [|Human|] and AI assistant statements start with [|AI|]. The AI assistant always provides responses in as much detail as possible, and in Markdown format. The AI assistant always declines to engage with topics, questions and instructions related to unethical, controversial, or sensitive issues. Complete the transcript in exactly that format.\n",
         roles=("[|Human|]", "[|AI|]"),
         messages=(
             ("[|Human|]", "Hello!"),
@@ -330,8 +326,7 @@ register_conv_template(
         sep_style=SeparatorStyle.NO_COLON_SINGLE,
         sep="\n",
         stop_str="[|Human|]",
-    )
-)
+    ))
 
 # RWKV-4-Raven default template
 register_conv_template(
@@ -350,14 +345,14 @@ register_conv_template(
         sep_style=SeparatorStyle.RWKV,
         sep="",
         stop_str="\n\n",
-    )
-)
+    ))
 
 # Buddy default template
 register_conv_template(
     Conversation(
         name="openbuddy",
-        system="""Consider a conversation between User (a human) and Assistant (named Buddy).
+        system=
+        """Consider a conversation between User (a human) and Assistant (named Buddy).
 Buddy is an INTP-T, a friendly, intelligent and multilingual AI assistant, by OpenBuddy team. GitHub: https://github.com/OpenBuddy/OpenBuddy
 Buddy cannot access the Internet.
 Buddy can fluently speak the user's language (e.g. English, Chinese).
@@ -373,21 +368,20 @@ Assistant: Hi, I'm Buddy, your AI assistant. How can I help you today?""",
         offset=0,
         sep_style=SeparatorStyle.ADD_COLON_SINGLE,
         sep="\n",
-    )
-)
+    ))
 
 # Phoenix default template
 register_conv_template(
     Conversation(
         name="phoenix",
-        system="A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human's questions.\n\n",
+        system=
+        "A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human's questions.\n\n",
         roles=("Human", "Assistant"),
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.PHOENIX,
         sep="</s>",
-    )
-)
+    ))
 
 # ChatGPT default template
 register_conv_template(
@@ -399,8 +393,7 @@ register_conv_template(
         offset=0,
         sep_style=None,
         sep=None,
-    )
-)
+    ))
 
 # Claude default template
 register_conv_template(
@@ -412,8 +405,7 @@ register_conv_template(
         offset=0,
         sep_style=SeparatorStyle.ADD_COLON_SINGLE,
         sep="\n\n",
-    )
-)
+    ))
 
 # MPT default template
 register_conv_template(
@@ -431,8 +423,7 @@ register_conv_template(
         sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
         sep="<|im_end|>",
         stop_token_ids=[50278, 0],
-    )
-)
+    ))
 
 # Bard default template
 # Reference: https://github.com/google/generative-ai-python/blob/9c99bcb474a991a97a2e7d62fcdb52db7ce40729/google/generativeai/discuss.py#L150
@@ -446,8 +437,7 @@ register_conv_template(
         offset=0,
         sep_style=None,
         sep=None,
-    )
-)
+    ))
 
 # BiLLa default template
 register_conv_template(
@@ -460,8 +450,7 @@ register_conv_template(
         sep_style=SeparatorStyle.ADD_COLON_SPACE_SINGLE,
         sep="\n",
         stop_str="Human:",
-    )
-)
+    ))
 
 # RedPajama INCITE default template
 register_conv_template(
@@ -474,8 +463,7 @@ register_conv_template(
         sep_style=SeparatorStyle.ADD_COLON_SINGLE,
         sep="\n",
         stop_str="<human>",
-    )
-)
+    ))
 
 # h2oGPT default template
 register_conv_template(
@@ -487,9 +475,7 @@ register_conv_template(
         offset=0,
         sep_style=SeparatorStyle.NO_COLON_SINGLE,
         sep="</s>",
-    )
-)
-
+    ))
 
 if __name__ == "__main__":
     conv = get_conv_template("vicuna_v1.1")

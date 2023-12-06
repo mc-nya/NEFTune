@@ -8,8 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    apply_activation_checkpointing,
-)
+    apply_activation_checkpointing, )
 from torch.distributed.elastic.multiprocessing.errors import record
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
@@ -45,7 +44,10 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def get_empty_model(model_config_path, add_tokens=1, wrapped_class=None, hack=False):
+def get_empty_model(model_config_path,
+                    add_tokens=1,
+                    wrapped_class=None,
+                    hack=False):
     model_config = transformers.AutoConfig.from_pretrained(model_config_path)
     model_config.vocab_size += add_tokens
     return get_fsdp_wrapped_empty_model(model_config, wrapped_class, hack=hack)
@@ -67,16 +69,20 @@ def get_model_opt_scheduler(
         wrapped_class=wrapped_class,
         hack=hack,
     )
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = get_cosine_schedule_with_warmup(
-        opt, int(max_steps * warmup_ratio), num_training_steps=max_steps
-    )
+    opt = torch.optim.AdamW(model.parameters(),
+                            lr=lr,
+                            weight_decay=weight_decay)
+    scheduler = get_cosine_schedule_with_warmup(opt,
+                                                int(max_steps * warmup_ratio),
+                                                num_training_steps=max_steps)
     return model, opt, scheduler
 
 
-def get_dataloader_and_sampler(
-    train_dataset, data_collator, batch_size, rank, world_size=4
-):
+def get_dataloader_and_sampler(train_dataset,
+                               data_collator,
+                               batch_size,
+                               rank,
+                               world_size=4):
     sampler = DistributedSampler(
         train_dataset,
         num_replicas=world_size,
@@ -133,14 +139,16 @@ def fsdp_main(rank, world_size, args):
     )
     if args.resume:
         model, opt, scheduler, start_step_count = load_model_opt_scheduler_states_fsdp(
-            model, opt, scheduler, args.checkpoint_path
-        )
+            model, opt, scheduler, args.checkpoint_path)
     else:
         model = load_state_dict_fsdp(model, args.init_checkpoint_path)
         start_step_count = 0
 
     if args.act_checkpointing:
-        check_fn = lambda submodule: isinstance(submodule, wrapped_class)
+
+        def check_fn(submodule):
+            return isinstance(submodule, wrapped_class)
+
         apply_activation_checkpointing(model, check_fn=check_fn)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -201,18 +209,18 @@ def fsdp_main(rank, world_size, args):
                 data = next(epoch_iterator)
             if args.mixup_strat is not None:
                 if args.mixup_strat not in ["simple"]:
-                    raise ValueError(f"Unknown mixup strategy {args.mixup_strat}")
+                    raise ValueError(
+                        f"Unknown mixup strategy {args.mixup_strat}")
                 if args.mixup_strat == "simple" and isinstance(
-                    model,
-                    torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel,
+                        model,
+                        torch.distributed.fsdp.fully_sharded_data_parallel.
+                        FullyShardedDataParallel,
                 ):
                     # First get embeddings
-                    embed_device = (
-                        model._fsdp_wrapped_module.model.embed_tokens.weight.device
-                    )
+                    embed_device = (model._fsdp_wrapped_module.model.
+                                    embed_tokens.weight.device)
                     embeds_init = model._fsdp_wrapped_module.model.embed_tokens.forward(
-                        data["input_ids"].to(embed_device)
-                    )
+                        data["input_ids"].to(embed_device))
                     # Create mixup
                     # in the simple strategy, assume we have 2*n examples in the batch and n weights (w1, w2, ..., wn > 0.5), we what to create a new batch of embeddings as follows:
                     # First n examples: w1 * embeds_1 + (1-w1) * embeds_(n+1), w2 * embeds_2 + (1-w2) * embeds_(n+2), ..., wn * embeds_n + (1-wn) * embeds_2n
@@ -223,11 +231,9 @@ def fsdp_main(rank, world_size, args):
                     half_len = batch_size // 2
                     mixup_alpha = args.mixup_alpha
                     # Sample mixup weights for half the batch
-                    mixup_weights_half = (
-                        torch.distributions.beta.Beta(mixup_alpha, mixup_alpha)
-                        .sample((half_len,))
-                        .to(embeds_init)
-                    )
+                    mixup_weights_half = (torch.distributions.beta.Beta(
+                        mixup_alpha, mixup_alpha).sample(
+                            (half_len, )).to(embeds_init))
 
                     # Ensure weights are greater than 0.5
                     mixup_weights_half = torch.where(
@@ -238,31 +244,26 @@ def fsdp_main(rank, world_size, args):
 
                     # Create full length mixup weights
                     mixup_weights_full = torch.cat(
-                        [mixup_weights_half, 1 - mixup_weights_half], dim=0
-                    )
+                        [mixup_weights_half, 1 - mixup_weights_half], dim=0)
 
                     # then, make weight <= 0.5 to be 1-weight
-                    mixup_weights_full = mixup_weights_full.unsqueeze(1).unsqueeze(2)
+                    mixup_weights_full = mixup_weights_full.unsqueeze(
+                        1).unsqueeze(2)
                     mixup_weights_full = mixup_weights_full.expand(
-                        -1, embeds_init.shape[1], embeds_init.shape[2]
-                    )
-                    is_mixup = torch.rand((batch_size,)) < args.mixup_prob
+                        -1, embeds_init.shape[1], embeds_init.shape[2])
+                    is_mixup = torch.rand((batch_size, )) < args.mixup_prob
 
                     # Now we have the weights, we can create the new embeddings
                     # First n examples
                     embed_new = torch.zeros_like(embeds_init).to(
-                        embeds_init
-                    )  # B x L x D
+                        embeds_init)  # B x L x D
                     if args.mixup_detach:
                         embed_new = (
-                            mixup_weights_full * embeds_init
-                            + (1 - mixup_weights_full) * embeds_init.detach()
-                        )
+                            mixup_weights_full * embeds_init +
+                            (1 - mixup_weights_full) * embeds_init.detach())
                     else:
-                        embed_new = (
-                            mixup_weights_full * embeds_init
-                            + (1 - mixup_weights_full) * embeds_init
-                        )
+                        embed_new = (mixup_weights_full * embeds_init +
+                                     (1 - mixup_weights_full) * embeds_init)
 
                     embed_new[~is_mixup] = embeds_init[~is_mixup]
 
@@ -272,23 +273,21 @@ def fsdp_main(rank, world_size, args):
 
             if args.neftune_alpha is not None:
                 if isinstance(
-                    model,
-                    torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel,
+                        model,
+                        torch.distributed.fsdp.fully_sharded_data_parallel.
+                        FullyShardedDataParallel,
                 ):
-                    embed_device = (
-                        model._fsdp_wrapped_module.model.embed_tokens.weight.device
-                    )
+                    embed_device = model._fsdp_wrapped_module.model.embed_tokens.weight.device
+
                     if data["input_ids"] is None:
                         embeds_init = data["inputs_embeds"].to(embed_device)
                     else:
-                        embeds_init = (
-                            model._fsdp_wrapped_module.model.embed_tokens.forward(
-                                data["input_ids"].to(embed_device)
-                            )
-                        )
+                        embeds_init = model._fsdp_wrapped_module.model.embed_tokens.forward(
+                            data["input_ids"].to(embed_device))
 
-                    ### add noise to embeds
-                    input_mask = data["attention_mask"].to(embeds_init)  # B x L
+                    # add noise to embeds
+                    input_mask = data["attention_mask"].to(
+                        embeds_init)  # B x L
                     input_lengths = torch.sum(input_mask, 1)  # B
 
                     noise_ = torch.zeros_like(embeds_init).uniform_(-1, 1)
@@ -298,7 +297,7 @@ def fsdp_main(rank, world_size, args):
                     delta = (delta * mag.view(-1, 1, 1)).detach()
                     data["inputs_embeds"] = delta + embeds_init
                     data["input_ids"] = None
-                    ### add noise to embeds
+                    # add noise to embeds
 
             out = model(**data)
 
@@ -314,15 +313,22 @@ def fsdp_main(rank, world_size, args):
             previous_time = start_step_count * estimated_time_per_iteration
             total_estimated_time = time_so_far + remaining_time + previous_time
             metrics_dict = {
-                "train/loss": train_loss,
-                "train/learning_rate": scheduler.get_last_lr()[0],
-                "train/global_step": step_count + 1,
-                "train/time_so_far": time_so_far,
-                "train/remaining_time": remaining_time,
-                "train/total_estimated_time": total_estimated_time,
-                "train/train_steps_per_second": 1
-                / (estimated_time_per_iteration * 3600),
-                "train/epoch": sampler.epoch,
+                "train/loss":
+                train_loss,
+                "train/learning_rate":
+                scheduler.get_last_lr()[0],
+                "train/global_step":
+                step_count + 1,
+                "train/time_so_far":
+                time_so_far,
+                "train/remaining_time":
+                remaining_time,
+                "train/total_estimated_time":
+                total_estimated_time,
+                "train/train_steps_per_second":
+                1 / (estimated_time_per_iteration * 3600),
+                "train/epoch":
+                sampler.epoch,
             }
             if args.wandb:
                 wandb.log(metrics_dict, step=step_count)
@@ -332,7 +338,8 @@ def fsdp_main(rank, world_size, args):
         opt.zero_grad()
 
         # save the model, optimizer, scheduler
-        if (step_count + 1) % save_steps == 0 or (step_count + 1) == args.max_steps:
+        if (step_count + 1) % save_steps == 0 or (step_count +
+                                                  1) == args.max_steps:
             if rank == 0:
                 print("saving checkpoint", step_count + 1)
             save_model_opt_scheduler_states_fsdp(
@@ -351,9 +358,13 @@ def fsdp_main(rank, world_size, args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--init_checkpoint_path", type=str, default="llama/7B_sharded")
+    parser.add_argument("--init_checkpoint_path",
+                        type=str,
+                        default="llama/7B_sharded")
     parser.add_argument("--model_config_path", type=str, default="llama/7B_hf")
-    parser.add_argument("--checkpoint_path", type=str, default="llama/7B_checkpoint")
+    parser.add_argument("--checkpoint_path",
+                        type=str,
+                        default="llama/7B_checkpoint")
     parser.add_argument(
         "--wrapped_class_name",
         type=str,
@@ -364,7 +375,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dont_save_opt",
         action="store_true",
-        help="dont save optimizer and scheduler, this saves hard disk memory by trading off ability to resume the run",
+        help=
+        "dont save optimizer and scheduler, this saves hard disk memory by trading off ability to resume the run",
     )
     parser.add_argument(
         "--keep_old_checkpoints",
@@ -373,7 +385,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--added_tokens", type=int, default=1)
     parser.add_argument("--port", default=None)
-    parser.add_argument("--data_path", type=str, default="data_instruct/alpaca.json")
+    parser.add_argument("--data_path",
+                        type=str,
+                        default="data_instruct/alpaca.json")
     parser.add_argument(
         "--data_fraction",
         type=float,
@@ -394,13 +408,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--hack",
         action="store_true",
-        help="This is a hack to reduce memory usage of the model by first casting the model to bf16 before moving to gpu"
+        help=
+        "This is a hack to reduce memory usage of the model by first casting the model to bf16 before moving to gpu"
         ", it uses less memory. However, it does not necessarily have the same training behavior as non-hacked version",
     )
     parser.add_argument("--max_grad_norm", type=float, default=1)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--act_checkpointing", action="store_true")
-    parser.add_argument("--save_steps", type=int, default=(52002 * 3 / 128) // 10)
+    parser.add_argument("--save_steps",
+                        type=int,
+                        default=(52002 * 3 / 128) // 10)
     parser.add_argument("--accumulation_steps", type=int, default=32)
     parser.add_argument("--neftune_alpha", type=float, default=None)
 
@@ -419,7 +436,6 @@ if __name__ == "__main__":
 
     WORLD_SIZE = torch.cuda.device_count()
     if args.port is None:
-        args.port = str(
-            random.randint(1024, 65353)
-        )  # randomly generate ports if not specified
+        args.port = str(random.randint(
+            1024, 65353))  # randomly generate ports if not specified
     mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
