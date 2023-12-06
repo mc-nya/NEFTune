@@ -175,7 +175,8 @@ class DataCollatorForSupervisedDataset:
         )
 
 
-def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
+def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer
+                                | transformers.PreTrainedTokenizerFast,
                                 data_path,
                                 data_fraction: float = 1.0,
                                 seed: int = 42) -> Dict:
