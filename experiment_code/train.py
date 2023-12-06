@@ -261,7 +261,7 @@ def fsdp_main(rank, world_size, args):
                         embeds_init)  # B x L x D
                     if args.mixup_detach:
                         embed_new = mixup_weights_full * embeds_init + (
-                            1 - mixup_weights_full) * embeds_to_mix.detach()
+                            (1 - mixup_weights_full) * embeds_to_mix).detach()
                     else:
                         embed_new = mixup_weights_full * embeds_init + (
                             1 - mixup_weights_full) * embeds_to_mix
