@@ -231,20 +231,16 @@ def fsdp_main(rank, world_size, args):
                     half_len = batch_size // 2
                     mixup_alpha = args.mixup_alpha
                     # Sample mixup weights for half the batch
-                    mixup_weights_half = (torch.distributions.beta.Beta(
+                    mixup_weights_full = (torch.distributions.beta.Beta(
                         mixup_alpha, mixup_alpha).sample(
-                            (half_len, )).to(embeds_init))
+                            (batch_size, )).to(embeds_init))
 
                     # Ensure weights are greater than 0.5
-                    mixup_weights_half = torch.where(
-                        mixup_weights_half <= 0.5,
-                        1 - mixup_weights_half,
-                        mixup_weights_half,
+                    mixup_weights_full = torch.where(
+                        mixup_weights_full <= 0.5,
+                        1 - mixup_weights_full,
+                        mixup_weights_full,
                     )
-
-                    # Create full length mixup weights
-                    mixup_weights_full = torch.cat(
-                        [mixup_weights_half, 1 - mixup_weights_half], dim=0)
 
                     # then, make weight <= 0.5 to be 1-weight
                     mixup_weights_full = mixup_weights_full.unsqueeze(
@@ -253,17 +249,22 @@ def fsdp_main(rank, world_size, args):
                         -1, embeds_init.shape[1], embeds_init.shape[2])
                     is_mixup = torch.rand((batch_size, )) < args.mixup_prob
 
+                    reversed_idx = torch.arange(batch_size - 1,
+                                                -1,
+                                                -1,
+                                                device=embeds_init.device)
+                    embeds_to_mix = embeds_init[reversed_idx]
+
                     # Now we have the weights, we can create the new embeddings
                     # First n examples
                     embed_new = torch.zeros_like(embeds_init).to(
                         embeds_init)  # B x L x D
                     if args.mixup_detach:
-                        embed_new = (
-                            mixup_weights_full * embeds_init +
-                            (1 - mixup_weights_full) * embeds_init.detach())
+                        embed_new = mixup_weights_full * embeds_init + (
+                            1 - mixup_weights_full) * embeds_to_mix.detach()
                     else:
-                        embed_new = (mixup_weights_full * embeds_init +
-                                     (1 - mixup_weights_full) * embeds_init)
+                        embed_new = mixup_weights_full * embeds_init + (
+                            1 - mixup_weights_full) * embeds_to_mix
 
                     embed_new[~is_mixup] = embeds_init[~is_mixup]
 
