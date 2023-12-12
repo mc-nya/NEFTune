@@ -80,6 +80,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
+    if os.path.exists(args.save_file_name):
+        print("File already exists, no need to generate again.")
+        exit()
+
     model_config = transformers.AutoConfig.from_pretrained(
         args.model_config_path)
     if isinstance(model_config, LlamaConfig):

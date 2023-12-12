@@ -13,3 +13,4 @@ pretrained_models/
 *_debug.py
 *_debug.sh
 datasets/
+output_backup/

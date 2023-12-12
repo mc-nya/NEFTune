@@ -21,6 +21,7 @@ from transformers.optimization import get_cosine_schedule_with_warmup
 from lion_pytorch import Lion
 from dataset import make_supervised_data_module
 from accelerate.data_loader import skip_first_batches
+from textaugment import Wordnet
 import wandb
 
 from utils import (
@@ -199,6 +200,26 @@ def fsdp_main(rank, world_size, args):
     start_time = time.time()
     for step_count in range(start_step_count, args.max_steps):
         train_loss = 0
+        if args.sam_rho > 0:
+            w_t = {k: v.clone() for k, v in model.named_parameters()}
+            for _ in range(4):
+                try:
+                    data = next(epoch_iterator)
+                except StopIteration:
+                    sampler.set_epoch(sampler.epoch + 1)
+                    dataloader = dataloader_full
+                    epoch_iterator = iter(dataloader)
+                    data = next(epoch_iterator)
+                out = model(**data)
+
+                (out.loss / accumulation_steps).backward()
+            with torch.no_grad():
+                for p in model.parameters():
+                    if p.grad is not None:
+                        p.add_(args.sam_rho * p.grad /
+                               (torch.norm(p.grad) + 1e-12))
+            model.zero_grad()
+
         for _ in range(accumulation_steps):
             try:
                 data = next(epoch_iterator)
@@ -207,6 +228,47 @@ def fsdp_main(rank, world_size, args):
                 dataloader = dataloader_full
                 epoch_iterator = iter(dataloader)
                 data = next(epoch_iterator)
+            if args.replace_WN:
+                # convert input_ids back to words
+                input_ids = data["input_ids"]
+                input_ids = input_ids.cpu().numpy()
+                input_ids = tokenizer.batch_decode(input_ids,
+                                                   skip_special_tokens=True)
+                t = Wordnet()
+                input_ids = t.augment(input_ids)
+                input_ids = tokenizer(input_ids,
+                                      padding="max_length",
+                                      truncation=True,
+                                      max_length=512,
+                                      return_tensors="pt")
+                data["input_ids"] = input_ids["input_ids"].to(
+                    data["input_ids"].device)
+
+            if args.drop_prob > 0:
+                batch_size = data["input_ids"].shape[0]
+                for i in range(batch_size):
+                    data["input_ids"][i,
+                                      torch.rand(data["input_ids"].shape[1]) <
+                                      args.drop_prob] = 0
+            if args.cutout_length > 0:
+                batch_size = data["input_ids"].shape[0]
+                # for each example, randomly choose a start position, plus a length, and set the input_ids to be 0
+                # this is equivalent to cutout
+                # we do this for each example in the batch
+                input_lengths = torch.sum(data["attention_mask"], 1)  # B
+                # cutout_start is #B , between 0 and input_lengths - cutout_length
+                cutout_length = args.cutout_length * input_lengths
+                cutout_length = cutout_length.long()
+                start_pos = torch.zeros((batch_size, ), dtype=torch.long)
+                for i in range(batch_size):
+                    start_pos[i] = torch.randint(
+                        0,
+                        input_lengths[i] - cutout_length[i] + 1,
+                        (1, ),
+                    )
+                for i in range(batch_size):
+                    data["input_ids"][i, start_pos[i]:start_pos[i] +
+                                      cutout_length[i]] = 0
             if args.mixup_strat is not None:
                 if args.mixup_strat not in ["simple"]:
                     raise ValueError(
@@ -334,6 +396,12 @@ def fsdp_main(rank, world_size, args):
             if args.wandb:
                 wandb.log(metrics_dict, step=step_count)
             print(json.dumps(metrics_dict, indent=4))
+
+        if args.sam_rho > 0:
+            with torch.no_grad():
+                for p, w in zip(model.parameters(), w_t.values()):
+                p.copy_(w) # copy back the original weights
+                
         opt.step()
         scheduler.step()
         opt.zero_grad()
@@ -432,6 +500,12 @@ if __name__ == "__main__":
     parser.add_argument("--mixup_alpha", type=float, default=0.2)
     parser.add_argument("--mixup_prob", type=float, default=0.5)
     parser.add_argument("--mixup_detach", action="store_true")
+
+    # augmentation arguments
+    parser.add_argument("--drop_prob", type=float, default=0.0)
+    parser.add_argument("--cutout_length", type=float, default=0)
+    parser.add_argument("--replace_WN", action="store_true")
+    parser.add_argument("--sam_rho", type=float, default=0.0)
 
     args = parser.parse_args()
 
