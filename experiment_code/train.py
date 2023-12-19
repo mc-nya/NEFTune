@@ -1,3 +1,4 @@
+from ast import arg
 import os
 import time
 import argparse
@@ -18,7 +19,6 @@ from transformers.models.opt.modeling_opt import OPTDecoderLayer
 from transformers.trainer_utils import seed_worker
 
 from transformers.optimization import get_cosine_schedule_with_warmup
-from lion_pytorch import Lion
 from dataset import make_supervised_data_module
 from accelerate.data_loader import skip_first_batches
 from textaugment import Wordnet
@@ -195,13 +195,15 @@ def fsdp_main(rank, world_size, args):
     )
 
     accumulation_steps = args.accumulation_steps
+    sam_accumulation_steps = args.sam_accumulation_steps
     save_steps = args.save_steps
     epoch_iterator = iter(dataloader)
     start_time = time.time()
     for step_count in range(start_step_count, args.max_steps):
         train_loss = 0
         if args.sam_rho > 0:
-            w_t = {k: v.clone() for k, v in model.named_parameters()}
+            with torch.no_grad():
+                w_t = {k: v.clone() for k, v in model.named_parameters()}
             for _ in range(4):
                 try:
                     data = next(epoch_iterator)
@@ -211,13 +213,14 @@ def fsdp_main(rank, world_size, args):
                     epoch_iterator = iter(dataloader)
                     data = next(epoch_iterator)
                 out = model(**data)
+                (out.loss / sam_accumulation_steps).backward()
 
-                (out.loss / accumulation_steps).backward()
+            model.clip_grad_norm_(args.max_grad_norm)
             with torch.no_grad():
                 for p in model.parameters():
                     if p.grad is not None:
-                        p.add_(args.sam_rho * p.grad /
-                               (torch.norm(p.grad) + 1e-12))
+                        p.data.add_(args.sam_rho * p.grad /
+                                    (torch.norm(p.grad) + 1e-12))
             model.zero_grad()
 
         for _ in range(accumulation_steps):
@@ -400,8 +403,8 @@ def fsdp_main(rank, world_size, args):
         if args.sam_rho > 0:
             with torch.no_grad():
                 for p, w in zip(model.parameters(), w_t.values()):
-                p.copy_(w) # copy back the original weights
-                
+                    p.copy_(w)  # copy back the original weights
+
         opt.step()
         scheduler.step()
         opt.zero_grad()
@@ -506,6 +509,7 @@ if __name__ == "__main__":
     parser.add_argument("--cutout_length", type=float, default=0)
     parser.add_argument("--replace_WN", action="store_true")
     parser.add_argument("--sam_rho", type=float, default=0.0)
+    parser.add_argument("--sam_accumulation_steps", type=int, default=4)
 
     args = parser.parse_args()
 
