@@ -21,7 +21,7 @@ from transformers.trainer_utils import seed_worker
 from transformers.optimization import get_cosine_schedule_with_warmup
 from dataset import make_supervised_data_module
 from accelerate.data_loader import skip_first_batches
-from textaugment import Wordnet
+#from textaugment import Wordnet
 import wandb
 
 from utils import (
@@ -48,10 +48,14 @@ def cleanup():
 def get_empty_model(model_config_path,
                     add_tokens=1,
                     wrapped_class=None,
-                    hack=False):
+                    hack=False,
+                    train_option=0):
     model_config = transformers.AutoConfig.from_pretrained(model_config_path)
     model_config.vocab_size += add_tokens
-    return get_fsdp_wrapped_empty_model(model_config, wrapped_class, hack=hack)
+    return get_fsdp_wrapped_empty_model(model_config,
+                                        wrapped_class,
+                                        hack=hack,
+                                        train_option=train_option)
 
 
 def get_model_opt_scheduler(
@@ -63,12 +67,14 @@ def get_model_opt_scheduler(
     lr=2e-5,
     wrapped_class=None,
     hack=False,
+    train_option=0,
 ):
     model = get_empty_model(
         model_config_path,
         add_tokens=added_tokens,
         wrapped_class=wrapped_class,
         hack=hack,
+        train_option=train_option,
     )
     opt = torch.optim.AdamW(model.parameters(),
                             lr=lr,
@@ -137,6 +143,7 @@ def fsdp_main(rank, world_size, args):
         lr=args.lr,
         wrapped_class=wrapped_class,
         hack=args.hack,
+        train_option=args.train_option,
     )
     if args.resume:
         model, opt, scheduler, start_step_count = load_model_opt_scheduler_states_fsdp(
@@ -231,21 +238,21 @@ def fsdp_main(rank, world_size, args):
                 dataloader = dataloader_full
                 epoch_iterator = iter(dataloader)
                 data = next(epoch_iterator)
-            if args.replace_WN:
-                # convert input_ids back to words
-                input_ids = data["input_ids"]
-                input_ids = input_ids.cpu().numpy()
-                input_ids = tokenizer.batch_decode(input_ids,
-                                                   skip_special_tokens=True)
-                t = Wordnet()
-                input_ids = t.augment(input_ids)
-                input_ids = tokenizer(input_ids,
-                                      padding="max_length",
-                                      truncation=True,
-                                      max_length=512,
-                                      return_tensors="pt")
-                data["input_ids"] = input_ids["input_ids"].to(
-                    data["input_ids"].device)
+            # if args.replace_WN:
+            #     # convert input_ids back to words
+            #     input_ids = data["input_ids"]
+            #     input_ids = input_ids.cpu().numpy()
+            #     input_ids = tokenizer.batch_decode(input_ids,
+            #                                        skip_special_tokens=True)
+            #     t = Wordnet()
+            #     input_ids = t.augment(input_ids)
+            #     input_ids = tokenizer(input_ids,
+            #                           padding="max_length",
+            #                           truncation=True,
+            #                           max_length=512,
+            #                           return_tensors="pt")
+            #     data["input_ids"] = input_ids["input_ids"].to(
+            #         data["input_ids"].device)
 
             if args.drop_prob > 0:
                 batch_size = data["input_ids"].shape[0]
@@ -510,6 +517,8 @@ if __name__ == "__main__":
     parser.add_argument("--replace_WN", action="store_true")
     parser.add_argument("--sam_rho", type=float, default=0.0)
     parser.add_argument("--sam_accumulation_steps", type=int, default=4)
+    # train_option: 0: train all, 1: train only mlp layers, 2: train only self_attn layers, 3: train first half of the network, 4: train last half of the network
+    parser.add_argument("--train_option", type=int, default=0)
 
     args = parser.parse_args()
 

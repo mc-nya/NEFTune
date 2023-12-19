@@ -17,6 +17,7 @@ from torch.distributed.fsdp.api import StateDictType
 from accelerate import init_empty_weights, load_checkpoint_and_dispatch
 import transformers
 import torch.distributed._shard.checkpoint as dist_cp
+from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaRotaryEmbedding
 
 # a filter to suppress type storage warnings
 warnings.filterwarnings("ignore", message="TypedStorage is deprecated.*")
@@ -37,19 +38,85 @@ def get_gpu_memory_usage(rank):
     }
 
 
-def get_fsdp_wrapped_empty_model(model_config, wrapped_cls, hack=False):
+def trainable_options(model, train_option):
+    if train_option == 0:
+        for name, param in model.named_parameters():
+            trainable = param.requires_grad
+            print(f"{name}: {trainable}")
+        num_params = sum(p.numel() for p in model.parameters()
+                         if p.requires_grad)
+        print(f"Total number of trainable parameters: {num_params}")
+        return model
+    for param in model.parameters():
+        param.requires_grad = False
+    model.lm_head.weight.requires_grad = True
+    num_layers = 0
+    # get the total number of layers
+    for name, param in model.named_parameters():
+        if "model.layers" in name:
+            # print(name)
+            # print(name.split("."), flush=True)
+
+            layer = int(name.split(".")[2])
+            num_layers = max(num_layers, layer + 1)
+
+    if train_option == 1:
+        # Train only mlp layers
+        for name, param in model.named_parameters():
+            if "mlp" in name:
+                param.requires_grad = True
+
+    elif train_option == 2:
+        # Train only self_attn layers
+        for name, param in model.named_parameters():
+            if "self_attn" in name:
+                param.requires_grad = True
+
+    elif train_option == 3:
+        # Train first half of the network
+        for layer_idx in range(num_layers // 2):
+            prefix = f"model.layers.{layer_idx}."
+            for name, param in model.named_parameters():
+                if name.startswith(prefix):
+                    param.requires_grad = True
+
+    elif train_option == 4:
+        # Train last half of the network
+        for layer_idx in range(num_layers // 2, num_layers):
+            prefix = f"model.layers.{layer_idx}."
+            for name, param in model.named_parameters():
+                if name.startswith(prefix):
+                    param.requires_grad = True
+    for name, param in model.named_parameters():
+        trainable = param.requires_grad
+        print(f"{name}: {trainable}")
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total number of trainable parameters: {num_params}")
+    return model
+
+
+def get_fsdp_wrapped_empty_model(model_config,
+                                 wrapped_cls,
+                                 hack=False,
+                                 train_option=0):
     with init_empty_weights():
         if hack:
             model = transformers.AutoModelForCausalLM.from_config(
                 model_config).bfloat16()
         else:
             model = transformers.AutoModelForCausalLM.from_config(model_config)
+    model = trainable_options(model, train_option)
     # this ensures that the nonpersistent buffer are overriden by the saved values, when loading the model
     make_nonpersistent_buffer_persistent(model)
     # hack to make the model wrappable by FSDP
     model.reset_parameters = lambda: None
     wrapped_cls.reset_parameters = lambda x: None
     torch.nn.Embedding.reset_parameters = lambda x: None
+    for layer in model.modules():
+        if type(layer) == LlamaRMSNorm:
+            layer.reset_parameters = lambda: None
+        if type(layer) == LlamaRotaryEmbedding:
+            layer.reset_parameters = lambda: None
 
     # wrap the empty model inside of FSDP
     my_auto_wrap_policy = functools.partial(
@@ -59,10 +126,17 @@ def get_fsdp_wrapped_empty_model(model_config, wrapped_cls, hack=False):
     bf16 = MixedPrecision(param_dtype=torch.bfloat16,
                           reduce_dtype=torch.bfloat16,
                           buffer_dtype=torch.bfloat16)
-    model = FSDP(model,
-                 auto_wrap_policy=my_auto_wrap_policy,
-                 device_id=torch.cuda.current_device(),
-                 mixed_precision=bf16)
+    if train_option == 0:
+        model = FSDP(model,
+                     auto_wrap_policy=my_auto_wrap_policy,
+                     device_id=torch.cuda.current_device(),
+                     mixed_precision=bf16)
+    else:
+        model = FSDP(model,
+                     auto_wrap_policy=my_auto_wrap_policy,
+                     device_id=torch.cuda.current_device(),
+                     mixed_precision=bf16,
+                     use_orig_params=True)
     return model
 
 
